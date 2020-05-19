@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/gorm"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var roomManager *Manager
@@ -14,6 +16,7 @@ var roomManager *Manager
 func main() {
 	roomManager = NewRoomManager()
 	router := gin.Default()
+	dbInit()
 	router.SetHTMLTemplate(html)
 
 	router.GET("/room/:roomid", roomGET)
@@ -22,6 +25,41 @@ func main() {
 	router.GET("/stream/:roomid", stream)
 
 	router.Run(":8080")
+}
+
+type ChatMessage struct {
+	gorm.Model
+	UserId string
+	RoomId string
+	Text   string
+}
+
+func dbInit() {
+	db := dbOpen()
+	db.AutoMigrate(&ChatMessage{})
+	defer db.Close()
+}
+
+func dbOpen() *gorm.DB {
+	db, err := gorm.Open("sqlite3", "test.sqlite3")
+	if err != nil {
+		panic("Failed to open DB (dbOpen)")
+	}
+	return db
+}
+
+func dbInsert(userid string, roomid string, text string) {
+	db := dbOpen()
+	db.Create(&ChatMessage{UserId: userid, RoomId: roomid, Text: text})
+	defer db.Close()
+}
+
+func dbGetAll(roomid string) []ChatMessage {
+	db := dbOpen()
+	var messages []ChatMessage
+	db.Order("created_at").Where("room_id = ?", roomid).Find(&messages)
+	db.Close()
+	return messages
 }
 
 func stream(c *gin.Context) {
@@ -44,9 +82,11 @@ func stream(c *gin.Context) {
 func roomGET(c *gin.Context) {
 	roomid := c.Param("roomid")
 	userid := fmt.Sprint(rand.Int31())
+	chatmessages := dbGetAll(roomid)
 	c.HTML(http.StatusOK, "chat_room", gin.H{
-		"roomid": roomid,
-		"userid": userid,
+		"roomid":   roomid,
+		"userid":   userid,
+		"messages": chatmessages,
 	})
 }
 
@@ -60,6 +100,7 @@ func roomPOST(c *gin.Context) {
 		"status":  "success",
 		"message": message,
 	})
+	dbInsert(userid, roomid, message)
 }
 
 func roomDELETE(c *gin.Context) {
